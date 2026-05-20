@@ -1,15 +1,51 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap');
 @import "tailwindcss";
 
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+@theme {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+  --color-bg:           oklch(11%  0.014 252);
+  --color-surface:      oklch(15%  0.018 252);
+  --color-raised:       oklch(19%  0.022 252);
+  --color-high:         oklch(24%  0.026 252);
+  --color-border:       oklch(28%  0.020 252);
+  --color-border-sub:   oklch(21%  0.016 252);
+
+  --color-accent:       oklch(63%  0.225 240);
+  --color-accent-hi:    oklch(70%  0.215 240);
+  --color-accent-dim:   oklch(23%  0.055 240);
+  --color-accent-muted: oklch(42%  0.090 240);
+
+  --color-ink-1:        oklch(93%  0.008 252);
+  --color-ink-2:        oklch(63%  0.012 252);
+  --color-ink-3:        oklch(41%  0.010 252);
+
+  --color-ok:           oklch(67%  0.155 148);
+  --color-ok-dim:       oklch(21%  0.048 148);
+  --color-warn:         oklch(76%  0.138 68);
+  --color-warn-dim:     oklch(21%  0.048 68);
+  --color-err:          oklch(62%  0.185 27);
+  --color-err-dim:      oklch(19%  0.048 27);
 }
 
-code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: oklch(11% 0.014 252);
+  color: oklch(93% 0.008 252);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+input, textarea, select, button {
+  font-family: inherit;
 }
