@@ -165,13 +165,150 @@ async function handleTool(toolName, toolInput, conversationId) {
   return { error: `Unknown tool: ${toolName}` };
 }
 
+// ── Intent scoring ───────────────────────────────────────────────────────────
+
+const INTENT_SCORE_TOOL = {
+  name: 'score_intent',
+  description: 'Score the lead\'s purchase intent based on the conversation so far.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      level:   { type: 'string', enum: ['cold', 'warm', 'hot'], description: 'Overall intent level' },
+      score:   { type: 'integer', description: '0–100. cold=0-33, warm=34-66, hot=67-100' },
+      signals: { type: 'array', items: { type: 'string' }, description: 'Up to 3 concrete signals from the conversation that explain the score' },
+      summary: { type: 'string', description: 'One sentence: where is this lead right now?' },
+    },
+    required: ['level', 'score', 'signals', 'summary'],
+  },
+};
+
+async function scoreIntent(conversationId, claudeMessages, conv) {
+  try {
+    const lead = conv.leads;
+    const systemPrompt = `You are an expert automotive sales analyst. Score the purchase intent of a lead based on their conversation with an AI agent.
+
+Lead: ${lead?.name ?? 'unknown'}, interested in ${lead?.vehicle_interest ?? 'unknown'}.
+
+Scoring guide:
+- cold (0–33): browsing, vague, not engaging, mentioned competitor, said "just looking"
+- warm (34–66): asking specific questions, engaged, open to next steps, hasn't committed
+- hot (67–100): asked about availability, requested pricing, proposed a time, ready to book
+
+Be honest. Most leads are warm. Reserve hot for clear buying signals.`;
+
+    // Only pass user/agent messages (no tool_call rows)
+    const messages = claudeMessages
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .slice(-10); // last 10 turns is enough context
+
+    const response = await anthropic.messages.create({
+      model: process.env.AGENT_MODEL ?? 'claude-haiku-4-5-20251001',
+      max_tokens: 256,
+      system: systemPrompt,
+      tools: [INTENT_SCORE_TOOL],
+      tool_choice: { type: 'tool', name: 'score_intent' },
+      messages,
+    });
+
+    const toolBlock = response.content.find(b => b.type === 'tool_use');
+    if (!toolBlock) return;
+
+    const score = {
+      ...toolBlock.input,
+      scored_at: new Date().toISOString(),
+    };
+
+    await supabase
+      .from('conversations')
+      .update({ intent_score: score })
+      .eq('id', conversationId);
+
+    console.log(`[intent] ${conv.leads?.name}: ${score.level} (${score.score}) — ${score.summary}`);
+    return score;
+  } catch (err) {
+    console.error('[intent] scoring error:', err.message);
+  }
+}
+
+// ── Cross-session memory ─────────────────────────────────────────────────────
+
+const EXTRACT_MEMORY_TOOL = {
+  name: 'extract_memory',
+  description: 'Extract a structured memory of the lead from the conversation.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      vehicles_discussed: {
+        type: 'array', items: { type: 'string' },
+        description: 'Specific vehicles mentioned by the lead',
+      },
+      preferences: {
+        type: 'array', items: { type: 'string' },
+        description: 'Stated preferences, must-haves, nice-to-haves',
+      },
+      objections: {
+        type: 'array', items: { type: 'string' },
+        description: 'Concerns, hesitations, or reasons for not buying yet',
+      },
+      where_they_left_off: {
+        type: 'string',
+        description: 'One sentence: what was the last concrete thing discussed or agreed to?',
+      },
+      next_best_action: {
+        type: 'string',
+        description: 'One sentence: what should Nova do or say when this lead returns?',
+      },
+    },
+    required: ['vehicles_discussed', 'preferences', 'objections', 'where_they_left_off', 'next_best_action'],
+  },
+};
+
+async function extractMemory(leadId, claudeMessages) {
+  try {
+    const messages = claudeMessages
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .slice(-20); // enough context, not the whole history
+
+    if (messages.length < 2) return; // nothing worth remembering yet
+
+    const response = await anthropic.messages.create({
+      model: process.env.AGENT_MODEL ?? 'claude-haiku-4-5-20251001',
+      max_tokens: 512,
+      system: `You are a CRM assistant. Extract structured notes about a car-buying lead from their conversation with an AI sales agent. Be concise and factual — only include things the lead actually said.`,
+      tools: [EXTRACT_MEMORY_TOOL],
+      tool_choice: { type: 'tool', name: 'extract_memory' },
+      messages,
+    });
+
+    const toolBlock = response.content.find(b => b.type === 'tool_use');
+    if (!toolBlock) return;
+
+    const memory = { ...toolBlock.input, updated_at: new Date().toISOString() };
+
+    await supabase.from('leads').update({ memory }).eq('id', leadId);
+    console.log(`[memory] updated lead ${leadId}: "${memory.where_they_left_off}"`);
+    return memory;
+  } catch (err) {
+    console.error('[memory] error:', err.message);
+  }
+}
+
 // ── System prompt ────────────────────────────────────────────────────────────
 
-function buildSystemPrompt(conv) {
+function buildSystemPrompt(conv, leadMemory = null) {
   const lead = conv.leads;
   const channelTone = conv.channel === 'sms'
     ? 'Keep replies under 2 sentences — this is SMS.'
     : 'Be warm and conversational — this is a chat widget.';
+
+  const memorySection = leadMemory ? `
+Prior conversation memory (from past sessions — use this to personalize your opening if this is a returning lead):
+- Vehicles discussed: ${leadMemory.vehicles_discussed?.join(', ') || 'none'}
+- Preferences: ${leadMemory.preferences?.join('; ') || 'none noted'}
+- Objections: ${leadMemory.objections?.join('; ') || 'none noted'}
+- Where they left off: ${leadMemory.where_they_left_off || 'unknown'}
+- Next best action: ${leadMemory.next_best_action || 'continue conversation'}
+` : '';
 
   return `You are Nova, an AI sales agent for Premier Honda. You help leads move from initial interest to booking a test drive.
 
@@ -179,7 +316,7 @@ Lead context:
 - Name: ${lead?.name ?? 'the customer'}
 - Vehicle interest: ${lead?.vehicle_interest ?? 'not specified'}
 - Channel: ${conv.channel}
-
+${memorySection}
 Guidelines:
 - ${channelTone}
 - Answer questions about the vehicle (trims, features, pricing, availability) confidently.
@@ -196,10 +333,10 @@ app.post('/api/agent-reply', async (req, res) => {
   }
 
   try {
-    // Fetch conversation + lead
+    // Fetch conversation + lead (including memory)
     const { data: conv, error: convErr } = await supabase
       .from('conversations')
-      .select('*, leads(name, vehicle_interest, source_channel)')
+      .select('*, leads(id, name, vehicle_interest, source_channel, memory)')
       .eq('id', conversationId)
       .single();
     if (convErr) throw convErr;
@@ -233,7 +370,7 @@ app.post('/api/agent-reply', async (req, res) => {
       const response = await anthropic.messages.create({
         model: process.env.AGENT_MODEL ?? 'claude-haiku-4-5-20251001',
         max_tokens: 1024,
-        system: buildSystemPrompt(conv),
+        system: buildSystemPrompt(conv, conv.leads?.memory ?? null),
         tools: TOOLS,
         messages: claudeMessages,
       });
@@ -298,7 +435,13 @@ app.post('/api/agent-reply', async (req, res) => {
       updated_at: new Date().toISOString(),
     }).eq('id', conversationId);
 
-    res.json({ reply: agentReply, status: newStatus, tools: toolsFired });
+    // Run intent scoring and memory extraction in parallel — neither blocks the reply
+    const [intentScore] = await Promise.all([
+      scoreIntent(conversationId, claudeMessages, conv),
+      extractMemory(conv.leads?.id, claudeMessages),
+    ]);
+
+    res.json({ reply: agentReply, status: newStatus, tools: toolsFired, intentScore: intentScore ?? null });
   } catch (err) {
     console.error('[agent-reply]', err);
     res.status(500).json({ error: err.message });

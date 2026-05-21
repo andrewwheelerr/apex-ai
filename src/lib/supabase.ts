@@ -31,6 +31,14 @@ export interface Lead {
   created_at: string;
 }
 
+export interface IntentScore {
+  level: 'cold' | 'warm' | 'hot';
+  score: number;
+  signals: string[];
+  summary: string;
+  scored_at: string;
+}
+
 export interface Conversation {
   id: string;
   dealership_id: string;
@@ -43,6 +51,7 @@ export interface Conversation {
   updated_at: string;
   last_message_at: string;
   last_message_preview: string | null;
+  intent_score: IntentScore | null;
   // joined
   leads?: Lead;
 }

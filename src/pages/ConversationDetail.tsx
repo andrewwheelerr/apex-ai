@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Send, AlertCircle, Calendar, UserCheck, Search } from 'lucide-react';
-import type { Conversation, Message } from '../lib/supabase';
+import type { Conversation, Message, IntentScore } from '../lib/supabase';
 
 const C = {
   brand:    '#007AFF',
@@ -88,6 +88,24 @@ function renderMarkdown(text: string): React.ReactNode {
   });
 }
 
+function IntentBadge({ intent }: { intent: IntentScore | null }) {
+  if (!intent) return null;
+  const meta = {
+    cold: { color: '#8E8E93', bg: 'rgba(142,142,147,0.10)', icon: '❄️' },
+    warm: { color: '#FF9500', bg: 'rgba(255,149,0,0.10)',   icon: '🌡' },
+    hot:  { color: '#FF3B30', bg: 'rgba(255,59,48,0.10)',   icon: '🔥' },
+  }[intent.level] ?? { color: '#8E8E93', bg: 'rgba(142,142,147,0.10)', icon: '❄️' };
+  return (
+    <span title={intent.signals.join(' · ')} style={{
+      fontSize: 11, fontWeight: 500, padding: '3px 9px',
+      borderRadius: 6, backgroundColor: meta.bg, color: meta.color,
+      cursor: 'default',
+    }}>
+      {meta.icon} {intent.level.charAt(0).toUpperCase() + intent.level.slice(1)} · {intent.score}
+    </span>
+  );
+}
+
 function StatusBadge({ status }: { status: string }) {
   const m = STATUS_META[status] ?? STATUS_META.closed;
   return (
@@ -168,9 +186,14 @@ export default function ConversationDetail() {
         };
         setMessages(prev => [...prev, agentMsg]);
       }
-      if (conv && data.status !== conv.status) {
-        setConv(c => c ? { ...c, status: data.status } : c);
-      }
+      setConv(c => {
+        if (!c) return c;
+        return {
+          ...c,
+          ...(data.status !== c.status ? { status: data.status } : {}),
+          ...(data.intentScore ? { intent_score: data.intentScore } : {}),
+        };
+      });
     } catch (err: any) {
       setError(err.message);
       // Roll back optimistic message
@@ -217,6 +240,7 @@ export default function ConversationDetail() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 15, fontWeight: 500, color: C.nearBlk }}>{lead?.name ?? '—'}</span>
                 {conv && <StatusBadge status={conv.status} />}
+                {conv?.intent_score && <IntentBadge intent={conv.intent_score} />}
               </div>
               <span style={{ fontSize: 12, color: C.midGray }}>
                 {lead?.vehicle_interest ?? '—'} · {conv ? CHANNEL_LABEL[conv.channel] ?? conv.channel : ''}

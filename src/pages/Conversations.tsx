@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, ArrowUpRight, Zap } from 'lucide-react';
 import { getConversations } from '../lib/queries';
-import type { Conversation } from '../lib/supabase';
+import type { Conversation, IntentScore } from '../lib/supabase';
 
 const C = {
   brand:    '#007AFF',
@@ -69,6 +69,31 @@ function StatusBadge({ status }: { status: string }) {
     }}>
       {m.label}
     </span>
+  );
+}
+
+const INTENT_META = {
+  cold: { label: 'Cold', color: '#8E8E93', bg: 'rgba(142,142,147,0.10)', flame: '🧊' },
+  warm: { label: 'Warm', color: '#FF9500', bg: 'rgba(255,149,0,0.10)',   flame: '🔥' },
+  hot:  { label: 'Hot',  color: '#FF3B30', bg: 'rgba(255,59,48,0.10)',   flame: '🔥' },
+};
+
+function IntentBadge({ intent }: { intent: IntentScore | null }) {
+  if (!intent) return null;
+  const m = INTENT_META[intent.level] ?? INTENT_META.cold;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        fontSize: 11, fontWeight: 500, padding: '2px 7px',
+        borderRadius: 6, backgroundColor: m.bg, color: m.color, whiteSpace: 'nowrap',
+      }}>
+        {intent.level === 'hot' ? '🔥' : intent.level === 'warm' ? '🌡' : '❄️'} {m.label} · {intent.score}
+      </span>
+      <span style={{ fontSize: 11, color: '#8E8E93', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {intent.summary}
+      </span>
+    </div>
   );
 }
 
@@ -297,6 +322,7 @@ export default function Conversations() {
                   <th style={{ ...TH, paddingLeft: 20 }}>Name</th>
                   <th style={TH}>Vehicle</th>
                   <th style={TH}>Last Message</th>
+                  <th style={TH}>Intent</th>
                   <th style={TH}>Channel</th>
                   <th style={TH}>Time</th>
                   <th style={TH}>Status</th>
@@ -306,7 +332,7 @@ export default function Conversations() {
               <tbody>
                 {visible.length === 0 ? (
                   <tr>
-                    <td colSpan={7} style={{ padding: '48px 20px', textAlign: 'center', color: C.midGray, fontSize: 14 }}>
+                    <td colSpan={8} style={{ padding: '48px 20px', textAlign: 'center', color: C.midGray, fontSize: 14 }}>
                       {rows.length === 0 ? 'No conversations yet.' : 'No results match your search.'}
                     </td>
                   </tr>
@@ -360,6 +386,14 @@ export default function Conversations() {
                             {row.last_message_preview ?? '—'}
                           </span>
                         )}
+                      </td>
+
+                      {/* Intent */}
+                      <td style={{ padding: '12px 16px' }}>
+                        {isThinking
+                          ? <span style={{ fontSize: 11, color: C.midGray }}>Scoring…</span>
+                          : <IntentBadge intent={row.intent_score} />
+                        }
                       </td>
 
                       {/* Channel */}
