@@ -1,243 +1,404 @@
-import React, { useState } from 'react';
-import { Search, Filter, ChevronDown } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Search, ArrowUpRight, Zap } from 'lucide-react';
+import { getConversations } from '../lib/queries';
+import type { Conversation } from '../lib/supabase';
 
 const C = {
-  bg:        'oklch(11%  0.014 252)',
-  surface:   'oklch(15%  0.018 252)',
-  raised:    'oklch(19%  0.022 252)',
-  high:      'oklch(24%  0.026 252)',
-  border:    'oklch(28%  0.020 252)',
-  borderSub: 'oklch(21%  0.016 252)',
-  accent:    'oklch(63%  0.225 240)',
-  accentHi:  'oklch(70%  0.215 240)',
-  accentDim: 'oklch(23%  0.055 240)',
-  ink1:      'oklch(93%  0.008 252)',
-  ink2:      'oklch(63%  0.012 252)',
-  ink3:      'oklch(41%  0.010 252)',
-  ok:        'oklch(67%  0.155 148)',
-  okDim:     'oklch(21%  0.048 148)',
-  warn:      'oklch(76%  0.138 68)',
-  warnDim:   'oklch(21%  0.048 68)',
-  err:       'oklch(62%  0.185 27)',
-  errDim:    'oklch(19%  0.048 27)',
+  brand:    '#007AFF',
+  nearBlk:  '#1D1D1F',
+  darkGray: '#3A3A3C',
+  midGray:  '#8E8E93',
+  surface:  '#F2F2F7',
+  white:    '#FFFFFF',
+  border:   'rgba(0,0,0,0.08)',
+  warning:  '#FF9500',
+  success:  '#34C759',
 };
 
-type Status = 'active' | 'handed_off' | 'closed';
+type FilterStatus = 'all' | 'active' | 'booked' | 'handed_off' | 'closed';
 
-interface Conversation {
-  id: string;
-  contact: string;
-  vehicle: string;
-  preview: string;
-  status: Status;
-  agent: string;
-  time: string;
-  source: string;
+const STATUS_META: Record<string, { label: string; bg: string; color: string }> = {
+  active:     { label: 'Active',       bg: 'rgba(0,122,255,0.10)',  color: '#007AFF' },
+  booked:     { label: 'Appt. Booked', bg: 'rgba(52,199,89,0.10)', color: '#34C759' },
+  handed_off: { label: 'Handed Off',   bg: 'rgba(255,149,0,0.10)', color: '#FF9500' },
+  closed:     { label: 'Closed',       bg: 'rgba(0,0,0,0.06)',     color: '#8E8E93' },
+};
+
+const CHANNEL_LABEL: Record<string, string> = {
+  sms:          'SMS',
+  website_chat: 'Website',
+  facebook:     'Facebook',
+};
+
+const filterOptions: { key: FilterStatus; label: string }[] = [
+  { key: 'all',        label: 'All'          },
+  { key: 'active',     label: 'Active'       },
+  { key: 'booked',     label: 'Appt. Booked' },
+  { key: 'handed_off', label: 'Handed Off'   },
+  { key: 'closed',     label: 'Closed'       },
+];
+
+// Opening messages Nova will respond to, keyed by vehicle interest fragment
+const OPENERS = [
+  'Hi, I saw your listing online and I\'m interested in learning more.',
+  'Hey, can you tell me more about availability and pricing?',
+  'I\'d like to schedule a test drive — what times do you have open?',
+  'Hi! I was browsing your inventory and had a few questions.',
+];
+
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
 
-const conversations: Conversation[] = [
-  { id: '1', contact: 'Marcus T.',    vehicle: '2024 Accord Sport',     preview: 'Sounds good — I can do Tuesday at 11am.',             status: 'active',     agent: 'Nova', time: '4m ago',    source: 'Website'  },
-  { id: '2', contact: 'Priya S.',     vehicle: '2025 CR-V Hybrid',      preview: 'What financing options do you have for that trim?',   status: 'active',     agent: 'Nova', time: '11m ago',   source: 'SMS'      },
-  { id: '3', contact: 'James W.',     vehicle: '2023 Pilot TrailSport', preview: 'I need to speak with someone about the trade value.', status: 'handed_off', agent: 'Nova', time: '28m ago',   source: 'Facebook' },
-  { id: '4', contact: 'Dana L.',      vehicle: '2024 Ridgeline AWD',    preview: 'Thanks, see you Saturday morning!',                  status: 'closed',     agent: 'Nova', time: '1h ago',    source: 'Website'  },
-  { id: '5', contact: 'Brendan H.',   vehicle: '2024 Civic Type R',     preview: 'Is the Type R still in stock?',                      status: 'closed',     agent: 'Nova', time: '2h ago',    source: 'SMS'      },
-  { id: '6', contact: 'Tanya M.',     vehicle: '2024 Passport Elite',   preview: 'Do you have it in Sonic Gray?',                      status: 'active',     agent: 'Nova', time: '3h ago',    source: 'Website'  },
-  { id: '7', contact: 'Raj P.',       vehicle: '2025 Odyssey EX-L',     preview: 'How long does financing approval usually take?',     status: 'handed_off', agent: 'Nova', time: '4h ago',    source: 'Email'    },
-  { id: '8', contact: 'Sarah K.',     vehicle: '2024 HR-V Sport',       preview: 'Okay, I will stop by after work on Friday.',         status: 'closed',     agent: 'Nova', time: '5h ago',    source: 'SMS'      },
-  { id: '9', contact: 'Elijah F.',    vehicle: '2023 Accord Hybrid',    preview: 'Can you match the price I got from the other dealer?',status: 'closed',    agent: 'Nova', time: '6h ago',    source: 'Website'  },
-  { id: '10',contact: 'Monique D.',   vehicle: '2024 Prologue AWD',     preview: 'I had no idea Honda made an EV — tell me more.',     status: 'active',     agent: 'Nova', time: '7h ago',    source: 'Facebook' },
-];
+function initials(name: string) {
+  return name.split(' ').map(n => n[0]).join('').slice(0, 2);
+}
 
-const statusConfig: Record<Status, { label: string; color: string; bg: string }> = {
-  active:     { label: 'Active',      color: C.accent,  bg: C.accentDim  },
-  handed_off: { label: 'Handed Off',  color: C.warn,    bg: C.warnDim    },
-  closed:     { label: 'Closed',      color: C.ink3,    bg: C.raised     },
+function StatusBadge({ status }: { status: string }) {
+  const m = STATUS_META[status] ?? STATUS_META.closed;
+  return (
+    <span style={{
+      fontSize: 11, fontWeight: 500, padding: '3px 9px',
+      borderRadius: 6, backgroundColor: m.bg, color: m.color, whiteSpace: 'nowrap',
+    }}>
+      {m.label}
+    </span>
+  );
+}
+
+function ThinkingDots() {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+      {[0, 1, 2].map(i => (
+        <span key={i} style={{
+          width: 4, height: 4, borderRadius: '50%',
+          backgroundColor: C.brand,
+          display: 'inline-block',
+          animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite`,
+        }} />
+      ))}
+    </span>
+  );
+}
+
+const TH: React.CSSProperties = {
+  padding: '0 16px 12px',
+  fontSize: 11,
+  fontWeight: 500,
+  textTransform: 'uppercase',
+  letterSpacing: '0.06em',
+  color: '#8E8E93',
+  textAlign: 'left',
+  whiteSpace: 'nowrap',
 };
 
-const filterOptions: { key: Status | 'all'; label: string }[] = [
-  { key: 'all',        label: 'All'        },
-  { key: 'active',     label: 'Active'     },
-  { key: 'handed_off', label: 'Handed Off' },
-  { key: 'closed',     label: 'Closed'     },
-];
-
 export default function Conversations() {
-  const [search, setSearch]   = useState('');
-  const [filter, setFilter]   = useState<Status | 'all'>('all');
-  const [hovered, setHovered] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const [rows, setRows]         = useState<Conversation[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState<string | null>(null);
+  const [search, setSearch]     = useState('');
+  const [filter, setFilter]     = useState<FilterStatus>('all');
+  const [thinking, setThinking] = useState<Set<string>>(new Set());
+  const [simulating, setSimulating] = useState(false);
 
-  const visible = conversations.filter(c => {
-    const matchSearch = search === '' ||
-      c.contact.toLowerCase().includes(search.toLowerCase()) ||
-      c.vehicle.toLowerCase().includes(search.toLowerCase());
-    const matchFilter = filter === 'all' || c.status === filter;
+  const loadConversations = useCallback(() => {
+    getConversations()
+      .then(data => { setRows(data); setLoading(false); })
+      .catch(err  => { setError(err.message); setLoading(false); });
+  }, []);
+
+  useEffect(() => {
+    loadConversations();
+    // Auto-refresh every 10s to show new simulated conversations and status updates
+    const interval = setInterval(loadConversations, 10_000);
+    return () => clearInterval(interval);
+  }, [loadConversations]);
+
+  async function simulateLead() {
+    if (simulating) return;
+    setSimulating(true);
+    try {
+      // Create a new conversation for a random lead
+      const simRes = await fetch('/api/simulate-lead', { method: 'POST' });
+      const { conversationId, lead } = await simRes.json();
+      if (!conversationId) throw new Error('No conversationId returned');
+
+      // Add to thinking set so the card shows the indicator immediately
+      setThinking(prev => new Set(prev).add(conversationId));
+
+      // Refresh list so the new conversation card appears
+      loadConversations();
+
+      // Fire an opening message — Nova responds live
+      const opener = OPENERS[Math.floor(Math.random() * OPENERS.length)];
+      await fetch('/api/agent-reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId, userMessage: opener }),
+      });
+
+      // Remove from thinking and refresh
+      setThinking(prev => { const s = new Set(prev); s.delete(conversationId); return s; });
+      loadConversations();
+    } catch (err: any) {
+      console.error('[simulate-lead]', err.message);
+    } finally {
+      setSimulating(false);
+    }
+  }
+
+  const counts: Record<FilterStatus, number> = {
+    all:        rows.length,
+    active:     rows.filter(r => r.status === 'active').length,
+    booked:     rows.filter(r => r.status === 'booked').length,
+    handed_off: rows.filter(r => r.status === 'handed_off').length,
+    closed:     rows.filter(r => r.status === 'closed').length,
+  };
+
+  const visible = rows.filter(r => {
+    const q = search.toLowerCase();
+    const lead = r.leads;
+    const matchSearch = !q ||
+      lead?.name.toLowerCase().includes(q) ||
+      lead?.vehicle_interest?.toLowerCase().includes(q);
+    const matchFilter = filter === 'all' || r.status === filter;
     return matchSearch && matchFilter;
   });
 
-  const counts = {
-    all:        conversations.length,
-    active:     conversations.filter(c => c.status === 'active').length,
-    handed_off: conversations.filter(c => c.status === 'handed_off').length,
-    closed:     conversations.filter(c => c.status === 'closed').length,
-  };
+  const activeThinking = thinking.size;
 
   return (
-    <div className="min-h-full" style={{ backgroundColor: C.bg }}>
+    <div style={{ minHeight: '100%', backgroundColor: '#F2F2F7' }}>
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 0.3; transform: scale(0.85); }
+          50% { opacity: 1; transform: scale(1); }
+        }
+      `}</style>
+
       {/* Header */}
-      <div
-        className="flex items-center gap-4 px-8 h-[58px] shrink-0"
-        style={{ borderBottom: `1px solid ${C.borderSub}`, backgroundColor: C.surface }}
-      >
-        <h1 className="text-[15px] font-semibold" style={{ color: C.ink1 }}>Conversations</h1>
-        <span
-          className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
-          style={{ backgroundColor: C.accentDim, color: C.accent }}
-        >
-          {conversations.filter(c => c.status === 'active').length} active
-        </span>
-      </div>
+      <div style={{ padding: '28px 32px 0' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+          <h1 style={{ fontSize: 28, fontWeight: 500, color: C.nearBlk, letterSpacing: '-0.5px', margin: 0 }}>
+            Conversations
+          </h1>
+          {!loading && (
+            <span style={{
+              fontSize: 11, fontWeight: 500, padding: '3px 8px', borderRadius: 6,
+              backgroundColor: 'rgba(0,122,255,0.10)', color: C.brand,
+            }}>
+              {counts.active} active
+            </span>
+          )}
+          {activeThinking > 0 && (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              fontSize: 11, fontWeight: 500, padding: '3px 8px', borderRadius: 6,
+              backgroundColor: 'rgba(52,199,89,0.10)', color: C.success,
+            }}>
+              <ThinkingDots />
+              Nova handling {activeThinking}
+            </span>
+          )}
 
-      <div className="px-8 pt-5 pb-8">
-        {/* Controls */}
-        <div className="flex items-center gap-3 mb-5">
-          {/* Search */}
-          <div
-            className="flex items-center gap-2 px-3 py-2 rounded-lg flex-1 max-w-[320px]"
-            style={{ backgroundColor: C.surface, border: `1px solid ${C.border}` }}
-          >
-            <Search size={13} style={{ color: C.ink3 }} />
-            <input
-              type="text"
-              placeholder="Search by name or vehicle..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              className="bg-transparent outline-none text-[13px] w-full placeholder:text-[13px]"
-              style={{ color: C.ink1 }}
-            />
-          </div>
-
-          {/* Filter tabs */}
-          <div
-            className="flex items-center p-0.5 rounded-lg gap-0.5"
-            style={{ backgroundColor: C.surface, border: `1px solid ${C.border}` }}
-          >
-            {filterOptions.map(opt => (
-              <button
-                key={opt.key}
-                onClick={() => setFilter(opt.key)}
-                className="px-3 py-1.5 rounded-md text-[12px] font-medium transition-colors duration-100"
-                style={{
-                  backgroundColor: filter === opt.key ? C.raised : 'transparent',
-                  color:           filter === opt.key ? C.ink1 : C.ink3,
-                }}
-              >
-                {opt.label}
-                <span
-                  className="ml-1.5 text-[10px]"
-                  style={{ color: filter === opt.key ? C.ink2 : C.ink3 }}
-                >
-                  {counts[opt.key]}
-                </span>
-              </button>
-            ))}
+          <div style={{ marginLeft: 'auto' }}>
+            <button
+              onClick={simulateLead}
+              disabled={simulating}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '8px 16px', borderRadius: 10, border: 'none',
+                backgroundColor: simulating ? C.surface : C.brand,
+                color: simulating ? C.midGray : '#FFFFFF',
+                fontSize: 13, fontWeight: 500, cursor: simulating ? 'default' : 'pointer',
+                transition: 'background-color 0.15s',
+              }}
+            >
+              <Zap size={13} />
+              {simulating ? 'Simulating…' : 'Simulate Lead'}
+            </button>
           </div>
         </div>
 
-        {/* Table */}
-        <div
-          className="rounded-xl overflow-hidden"
-          style={{ border: `1px solid ${C.border}`, backgroundColor: C.surface }}
-        >
-          {/* Column headers */}
-          <div
-            className="grid px-5 py-2.5 text-[10px] font-semibold uppercase tracking-[0.07em]"
-            style={{
-              gridTemplateColumns: '2fr 2fr 3fr 100px 80px 90px',
-              color: C.ink3,
-              borderBottom: `1px solid ${C.border}`,
-            }}
-          >
-            <span>Contact</span>
-            <span>Vehicle</span>
-            <span>Last Message</span>
-            <span>Status</span>
-            <span>Source</span>
-            <span className="text-right">Time</span>
+        {/* Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '8px 12px', borderRadius: 10,
+            backgroundColor: C.white, border: `0.5px solid ${C.border}`,
+            flex: 1, maxWidth: 300,
+          }}>
+            <Search size={14} style={{ color: C.midGray, flexShrink: 0 }} />
+            <input
+              type="text"
+              placeholder="Search by name or vehicle"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ background: 'none', border: 'none', outline: 'none', fontSize: 14, color: C.nearBlk, width: '100%' }}
+            />
           </div>
 
-          {/* Rows */}
-          {visible.length === 0 ? (
-            <div className="px-5 py-12 text-center text-[13px]" style={{ color: C.ink3 }}>
-              No conversations match your search.
-            </div>
-          ) : (
-            visible.map((row, i) => {
-              const sc = statusConfig[row.status];
-              const isLast = i === visible.length - 1;
-              const isHovered = hovered === row.id;
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 4, padding: 4,
+            borderRadius: 10, backgroundColor: C.white, border: `0.5px solid ${C.border}`,
+          }}>
+            {filterOptions.map(opt => {
+              const active = filter === opt.key;
               return (
-                <div
-                  key={row.id}
-                  className="grid px-5 py-3.5 cursor-pointer transition-colors duration-75"
+                <button
+                  key={opt.key}
+                  onClick={() => setFilter(opt.key)}
                   style={{
-                    gridTemplateColumns: '2fr 2fr 3fr 100px 80px 90px',
-                    borderBottom: isLast ? 'none' : `1px solid ${C.borderSub}`,
-                    backgroundColor: isHovered ? C.raised : 'transparent',
+                    padding: '5px 12px', borderRadius: 7, border: 'none', cursor: 'pointer',
+                    fontSize: 13, fontWeight: active ? 500 : 400,
+                    backgroundColor: active ? C.brand : 'transparent',
+                    color: active ? '#FFFFFF' : C.darkGray,
+                    transition: 'all 0.1s',
                   }}
-                  onMouseEnter={() => setHovered(row.id)}
-                  onMouseLeave={() => setHovered(null)}
                 >
-                  {/* Contact */}
-                  <div className="flex items-center gap-2.5 min-w-0 pr-4">
-                    <div
-                      className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0"
-                      style={{ backgroundColor: C.accentDim, color: C.accent }}
-                    >
-                      {row.contact.split(' ').map(n => n[0]).join('')}
-                    </div>
-                    <span className="text-[13px] font-medium truncate" style={{ color: C.ink1 }}>
-                      {row.contact}
-                    </span>
-                  </div>
-
-                  {/* Vehicle */}
-                  <div className="flex items-center pr-4 min-w-0">
-                    <span className="text-[12px] truncate" style={{ color: C.ink2 }}>{row.vehicle}</span>
-                  </div>
-
-                  {/* Preview */}
-                  <div className="flex items-center pr-4 min-w-0">
-                    <span className="text-[12px] truncate" style={{ color: C.ink3 }}>"{row.preview}"</span>
-                  </div>
-
-                  {/* Status */}
-                  <div className="flex items-center">
-                    <span
-                      className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2 py-1 rounded-md"
-                      style={{ backgroundColor: sc.bg, color: sc.color }}
-                    >
-                      {row.status === 'active' && (
-                        <span
-                          className="w-1.5 h-1.5 rounded-full shrink-0"
-                          style={{ backgroundColor: sc.color }}
-                        />
-                      )}
-                      {sc.label}
-                    </span>
-                  </div>
-
-                  {/* Source */}
-                  <div className="flex items-center">
-                    <span className="text-[12px]" style={{ color: C.ink3 }}>{row.source}</span>
-                  </div>
-
-                  {/* Time */}
-                  <div className="flex items-center justify-end">
-                    <span className="text-[11px]" style={{ color: C.ink3 }}>{row.time}</span>
-                  </div>
-                </div>
+                  {opt.label}
+                  <span style={{ marginLeft: 5, fontSize: 11, color: active ? 'rgba(255,255,255,0.75)' : C.midGray }}>
+                    {counts[opt.key]}
+                  </span>
+                </button>
               );
-            })
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div style={{ padding: '0 32px 32px' }}>
+        <div style={{ backgroundColor: C.white, borderRadius: 10, border: `0.5px solid ${C.border}`, overflow: 'hidden' }}>
+
+          {loading && (
+            <div style={{ padding: '48px 20px', textAlign: 'center', color: C.midGray, fontSize: 14 }}>
+              Loading conversations…
+            </div>
+          )}
+
+          {error && (
+            <div style={{ padding: '48px 20px', textAlign: 'center', color: '#FF3B30', fontSize: 13 }}>
+              Could not load data: {error}
+            </div>
+          )}
+
+          {!loading && !error && (
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: `0.5px solid ${C.border}` }}>
+                  <th style={{ ...TH, paddingLeft: 20 }}>Name</th>
+                  <th style={TH}>Vehicle</th>
+                  <th style={TH}>Last Message</th>
+                  <th style={TH}>Channel</th>
+                  <th style={TH}>Time</th>
+                  <th style={TH}>Status</th>
+                  <th style={TH}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} style={{ padding: '48px 20px', textAlign: 'center', color: C.midGray, fontSize: 14 }}>
+                      {rows.length === 0 ? 'No conversations yet.' : 'No results match your search.'}
+                    </td>
+                  </tr>
+                ) : visible.map((row, i) => {
+                  const lead = row.leads;
+                  const isLast = i === visible.length - 1;
+                  const isThinking = thinking.has(row.id);
+                  return (
+                    <tr
+                      key={row.id}
+                      style={{
+                        borderBottom: isLast ? 'none' : `0.5px solid ${C.border}`,
+                        backgroundColor: isThinking ? 'rgba(0,122,255,0.02)' : 'transparent',
+                        transition: 'background-color 0.2s',
+                      }}
+                    >
+                      {/* Name */}
+                      <td style={{ padding: '12px 16px 12px 20px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <div style={{
+                            width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+                            backgroundColor: isThinking ? 'rgba(0,122,255,0.15)' : 'rgba(0,122,255,0.10)',
+                            color: C.brand,
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: 11, fontWeight: 600,
+                            transition: 'background-color 0.2s',
+                          }}>
+                            {initials(lead?.name ?? '?')}
+                          </div>
+                          <span style={{ fontSize: 14, fontWeight: 500, color: C.nearBlk }}>
+                            {lead?.name ?? '—'}
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* Vehicle */}
+                      <td style={{ padding: '12px 16px' }}>
+                        <span style={{ fontSize: 13, color: C.darkGray }}>
+                          {lead?.vehicle_interest ?? '—'}
+                        </span>
+                      </td>
+
+                      {/* Last message / thinking indicator */}
+                      <td style={{ padding: '12px 16px', maxWidth: 280 }}>
+                        {isThinking ? (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: C.brand }}>
+                            <ThinkingDots /> Nova is responding…
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: 13, color: C.midGray, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
+                            {row.last_message_preview ?? '—'}
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Channel */}
+                      <td style={{ padding: '12px 16px' }}>
+                        <span style={{ fontSize: 12, color: C.midGray }}>
+                          {CHANNEL_LABEL[row.channel] ?? row.channel}
+                        </span>
+                      </td>
+
+                      {/* Time */}
+                      <td style={{ padding: '12px 16px' }}>
+                        <span style={{ fontSize: 12, color: C.midGray }}>
+                          {timeAgo(row.last_message_at)}
+                        </span>
+                      </td>
+
+                      {/* Status */}
+                      <td style={{ padding: '12px 16px' }}>
+                        <StatusBadge status={row.status} />
+                      </td>
+
+                      {/* View */}
+                      <td style={{ padding: '12px 20px 12px 8px', textAlign: 'right' }}>
+                        <button
+                          onClick={() => navigate(`/conversations/${row.id}`)}
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                            fontSize: 12, color: C.brand, background: 'none', border: 'none',
+                            cursor: 'pointer', fontWeight: 500,
+                          }}
+                        >
+                          View <ArrowUpRight size={13} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           )}
         </div>
       </div>

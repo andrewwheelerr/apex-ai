@@ -1,250 +1,304 @@
-import React from 'react';
-import { TrendingUp, TrendingDown, Clock, Calendar, ChevronDown } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ChevronDown, Clock } from 'lucide-react';
+import { getKPIs, getConversations } from '../lib/queries';
+import type { Conversation } from '../lib/supabase';
 
 const C = {
-  bg:        'oklch(11%  0.014 252)',
-  surface:   'oklch(15%  0.018 252)',
-  raised:    'oklch(19%  0.022 252)',
-  border:    'oklch(28%  0.020 252)',
-  borderSub: 'oklch(21%  0.016 252)',
-  accent:    'oklch(63%  0.225 240)',
-  accentHi:  'oklch(70%  0.215 240)',
-  accentDim: 'oklch(23%  0.055 240)',
-  ink1:      'oklch(93%  0.008 252)',
-  ink2:      'oklch(63%  0.012 252)',
-  ink3:      'oklch(41%  0.010 252)',
-  ok:        'oklch(67%  0.155 148)',
-  okDim:     'oklch(21%  0.048 148)',
-  warn:      'oklch(76%  0.138 68)',
-  warnDim:   'oklch(21%  0.048 68)',
+  brand:    '#007AFF',
+  nearBlk:  '#1D1D1F',
+  darkGray: '#3A3A3C',
+  midGray:  '#8E8E93',
+  surface:  '#F2F2F7',
+  white:    '#FFFFFF',
+  border:   'rgba(0,0,0,0.08)',
+  success:  '#34C759',
+  warning:  '#FF9500',
+  danger:   '#FF3B30',
 };
 
-interface Metric {
-  label: string;
-  value: string;
-  subtext: string;
-  delta: string;
-  up: boolean;
-  positive: boolean; // true = up is good
+const sourceData = [
+  { label: 'Website Chat',  key: 'website_chat' },
+  { label: 'SMS / Text',    key: 'sms'          },
+  { label: 'Facebook',      key: 'facebook'     },
+];
+
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
 }
 
-const metrics: Metric[] = [
-  { label: 'Leads Responded', value: '847',    subtext: 'This week',        delta: '+12%', up: true,  positive: true  },
-  { label: 'Appts. Booked',   value: '63',     subtext: 'This week',        delta: '+8%',  up: true,  positive: true  },
-  { label: 'Avg Response',    value: '1m 24s', subtext: 'vs 1m 42s prior',  delta: '−14%', up: false, positive: false },
-  { label: 'Handoff Rate',    value: '6.2%',   subtext: 'of all convos',    delta: '−1.1pp', up: false, positive: false },
-];
+const dateRanges = ['Last 7 days', 'Last 30 days', 'This month', 'Custom'];
 
-const hourlyData = [12, 8, 3, 1, 1, 2, 5, 18, 31, 42, 47, 38, 35, 41, 44, 49, 52, 46, 38, 29, 22, 18, 15, 13];
+function StatusBadge({ status }: { status: string }) {
+  const map: Record<string, { label: string; bg: string; color: string }> = {
+    active:     { label: 'Active',      bg: 'rgba(0,122,255,0.10)',  color: C.brand   },
+    handed_off: { label: 'Handed Off',  bg: 'rgba(255,149,0,0.10)',  color: C.warning },
+    booked:     { label: 'Appt. Booked',bg: 'rgba(52,199,89,0.10)', color: C.success },
+    closed:     { label: 'Closed',      bg: 'rgba(0,0,0,0.06)',      color: C.midGray },
+  };
+  const s = map[status] ?? map.closed;
+  return (
+    <span style={{
+      fontSize: 11, fontWeight: 500, padding: '2px 8px', borderRadius: 6,
+      backgroundColor: s.bg, color: s.color,
+    }}>
+      {s.label}
+    </span>
+  );
+}
 
-const channelBreakdown = [
-  { label: 'Website Chat',  count: 412, pct: 49 },
-  { label: 'SMS / Text',    count: 276, pct: 33 },
-  { label: 'Facebook Lead', count: 110, pct: 13 },
-  { label: 'Email Intake',  count:  49, pct:  6 },
-];
+function initials(name: string) {
+  return name.split(' ').map(n => n[0]).join('').slice(0, 2);
+}
 
-const recentActivity = [
-  { name: 'Marcus T.',  vehicle: '2024 Accord Sport',   action: 'Appointment booked',    time: '4m ago',  ok: true  },
-  { name: 'Priya S.',   vehicle: '2025 CR-V Hybrid',    action: 'Active — awaiting reply',time: '11m ago', ok: null  },
-  { name: 'James W.',   vehicle: '2023 Pilot TrailSport',action: 'Handed off to sales',   time: '28m ago', ok: false },
-  { name: 'Dana L.',    vehicle: '2024 Ridgeline AWD',  action: 'Appointment booked',    time: '1h ago',  ok: true  },
-  { name: 'Brendan H.', vehicle: '2024 Civic Type R',   action: 'Closed — no response',  time: '2h ago',  ok: null  },
-];
-
-const maxHourly = Math.max(...hourlyData);
+interface KPIData {
+  total: number;
+  active: number;
+  booked: number;
+  handed_off: number;
+  closed: number;
+  appts_this_week: number;
+  handoffs_this_week: number;
+}
 
 export default function Dashboard() {
+  const [range, setRange] = useState('Last 7 days');
+  const [rangeOpen, setRangeOpen] = useState(false);
+  const [kpis, setKpis] = useState<KPIData | null>(null);
+  const [recent, setRecent] = useState<Conversation[]>([]);
+
+  useEffect(() => {
+    getKPIs().then(setKpis).catch(console.error);
+    getConversations().then(data => setRecent(data.slice(0, 6))).catch(console.error);
+  }, []);
+
   return (
-    <div className="min-h-full" style={{ backgroundColor: C.bg }}>
+    <div style={{ minHeight: '100%', backgroundColor: C.surface }}>
       {/* Page header */}
-      <div
-        className="flex items-center justify-between px-8 h-[58px] shrink-0"
-        style={{ borderBottom: `1px solid ${C.borderSub}`, backgroundColor: C.surface }}
-      >
-        <div>
-          <h1 className="text-[15px] font-semibold" style={{ color: C.ink1 }}>
-            Performance Overview
-          </h1>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '28px 32px 0',
+      }}>
+        <h1 style={{ fontSize: 28, fontWeight: 500, color: C.nearBlk, letterSpacing: '-0.5px', margin: 0 }}>
+          Dashboard
+        </h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 13, color: C.midGray }}>Premier Honda</span>
+          <div style={{ position: 'relative' }}>
+            <button
+              onClick={() => setRangeOpen(o => !o)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '7px 12px', borderRadius: 10,
+                backgroundColor: C.white, border: `0.5px solid ${C.border}`,
+                fontSize: 13, color: C.darkGray, cursor: 'pointer', fontWeight: 400,
+              }}
+            >
+              {range}
+              <ChevronDown size={13} style={{ color: C.midGray }} />
+            </button>
+            {rangeOpen && (
+              <div style={{
+                position: 'absolute', right: 0, top: 'calc(100% + 4px)',
+                backgroundColor: C.white, border: `0.5px solid ${C.border}`,
+                borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+                overflow: 'hidden', zIndex: 50, minWidth: 150,
+              }}>
+                {dateRanges.map(r => (
+                  <button
+                    key={r}
+                    onClick={() => { setRange(r); setRangeOpen(false); }}
+                    style={{
+                      width: '100%', display: 'block', padding: '9px 14px',
+                      fontSize: 13, color: r === range ? C.brand : C.nearBlk,
+                      backgroundColor: r === range ? 'rgba(0,122,255,0.06)' : 'transparent',
+                      border: 'none', cursor: 'pointer', textAlign: 'left',
+                      fontWeight: r === range ? 500 : 400,
+                    }}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-        <button
-          className="flex items-center gap-1.5 text-[12px] px-3 py-1.5 rounded-lg"
-          style={{ backgroundColor: C.raised, color: C.ink2, border: `1px solid ${C.border}` }}
-        >
-          <Calendar size={12} />
-          Last 7 days
-          <ChevronDown size={12} />
-        </button>
       </div>
 
-      <div className="px-8 py-6 space-y-5">
-
-        {/* Metrics strip */}
-        <div
-          className="rounded-xl overflow-hidden grid grid-cols-4"
-          style={{ backgroundColor: C.surface, border: `1px solid ${C.border}` }}
-        >
-          {metrics.map((m, i) => (
-            <div
-              key={m.label}
-              className="px-6 py-5"
-              style={{ borderRight: i < metrics.length - 1 ? `1px solid ${C.border}` : 'none' }}
-            >
-              <p className="text-[11px] font-medium uppercase tracking-[0.07em] mb-3" style={{ color: C.ink3 }}>
-                {m.label}
-              </p>
-              <p
-                className="text-[28px] font-semibold tracking-[-0.02em] leading-none mb-1.5"
-                style={{ color: C.ink1, fontVariantNumeric: 'tabular-nums' }}
+      <div style={{ padding: '20px 32px 32px' }}>
+        {/* Hero frosted glass KPI card */}
+        <div style={{ position: 'relative', marginBottom: 16 }}>
+          {/* Gradient backdrop so the blur has something to work with */}
+          <div style={{
+            position: 'absolute', inset: -2,
+            background: 'linear-gradient(135deg, rgba(0,122,255,0.13) 0%, rgba(52,199,89,0.05) 60%, transparent 100%)',
+            borderRadius: 16,
+          }} />
+          <div style={{
+            position: 'relative',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            backgroundColor: 'rgba(255,255,255,0.72)',
+            borderRadius: 14,
+            border: `0.5px solid ${C.border}`,
+            padding: '24px 32px',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(4, 1fr)',
+          }}>
+            {[
+              { label: 'Total Conversations', value: kpis ? String(kpis.total)            : '—', sub: 'all time'         },
+              { label: 'Active Now',           value: kpis ? String(kpis.active)           : '—', sub: 'in progress'      },
+              { label: 'Appts This Week',      value: kpis ? String(kpis.appts_this_week)  : '—', sub: 'booked by agent'  },
+              { label: 'Handoff Rate',         value: kpis ? (kpis.total > 0 ? `${((kpis.handed_off / kpis.total) * 100).toFixed(1)}%` : '0%') : '—', sub: 'of all convos' },
+            ].map((kpi, i, arr) => (
+              <div
+                key={kpi.label}
+                style={{
+                  paddingRight: i < arr.length - 1 ? 32 : 0,
+                  borderRight: i < arr.length - 1 ? `0.5px solid ${C.border}` : 'none',
+                  paddingLeft: i > 0 ? 32 : 0,
+                }}
               >
-                {m.value}
-              </p>
-              <div className="flex items-center gap-1.5">
-                <span
-                  className="flex items-center gap-0.5 text-[11px] font-medium"
-                  style={{ color: m.up === m.positive ? C.ok : C.warn }}
-                >
-                  {m.up
-                    ? <TrendingUp size={11} strokeWidth={2} />
-                    : <TrendingDown size={11} strokeWidth={2} />
-                  }
-                  {m.delta}
-                </span>
-                <span className="text-[11px]" style={{ color: C.ink3 }}>{m.subtext}</span>
+                <p style={{ fontSize: 11, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em', color: C.midGray, margin: '0 0 10px' }}>
+                  {kpi.label}
+                </p>
+                <p style={{ fontSize: 28, fontWeight: 500, color: C.nearBlk, letterSpacing: '-0.5px', margin: '0 0 6px', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
+                  {kpi.value}
+                </p>
+                <span style={{ fontSize: 12, color: C.midGray }}>{kpi.sub}</span>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
 
-        {/* Main content row */}
-        <div className="grid grid-cols-[1fr_280px] gap-5">
-
-          {/* Hourly activity chart */}
-          <div
-            className="rounded-xl p-6"
-            style={{ backgroundColor: C.surface, border: `1px solid ${C.border}` }}
-          >
-            <div className="flex items-center justify-between mb-5">
-              <div>
-                <h2 className="text-[13px] font-semibold" style={{ color: C.ink1 }}>
-                  Lead Activity
-                </h2>
-                <p className="text-[12px] mt-0.5" style={{ color: C.ink3 }}>Conversations started by hour of day</p>
-              </div>
-              <div className="flex items-center gap-1.5 text-[11px]" style={{ color: C.ink3 }}>
-                <Clock size={11} />
-                Today
-              </div>
+        {/* Two-column section */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 16 }}>
+          {/* Left: Conversations by Source bar chart */}
+          <div style={{
+            backgroundColor: C.white, borderRadius: 10, border: `0.5px solid ${C.border}`,
+            padding: 24,
+          }}>
+            <div style={{ marginBottom: 20 }}>
+              <h2 style={{ fontSize: 15, fontWeight: 500, color: C.nearBlk, margin: '0 0 2px' }}>
+                Conversations by Source
+              </h2>
+              <p style={{ fontSize: 13, color: C.midGray, margin: 0 }}>All time</p>
             </div>
 
-            {/* Chart */}
-            <div className="flex items-end gap-[3px]" style={{ height: 96 }}>
-              {hourlyData.map((v, i) => {
-                const heightPct = (v / maxHourly) * 100;
-                const isBusiness = i >= 8 && i <= 19;
+            {(() => {
+              const counts = sourceData.map(d => ({
+                ...d,
+                count: recent.length > 0
+                  ? (kpis ? [
+                    { key: 'website_chat', n: recent.filter(r => r.channel === 'website_chat').length },
+                    { key: 'sms',          n: recent.filter(r => r.channel === 'sms').length },
+                    { key: 'facebook',     n: recent.filter(r => r.channel === 'facebook').length },
+                  ].find(x => x.key === d.key)?.n ?? 0 : 0)
+                  : 0,
+              }));
+              const total = counts.reduce((s, d) => s + d.count, 0);
+              const maxC = Math.max(...counts.map(d => d.count), 1);
+              return (
+                <>
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, height: 160, marginBottom: 12 }}>
+                    {counts.map(d => {
+                      const h = Math.max((d.count / maxC) * 140, d.count > 0 ? 8 : 4);
+                      return (
+                        <div key={d.label} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: 12, fontWeight: 500, color: C.darkGray, fontVariantNumeric: 'tabular-nums' }}>
+                            {d.count}
+                          </span>
+                          <div style={{
+                            width: '100%', height: h, borderRadius: '5px 5px 0 0',
+                            backgroundColor: C.brand, opacity: d.count > 0 ? 0.18 + (d.count / maxC) * 0.72 : 0.08,
+                          }} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: 'flex', gap: 16 }}>
+                    {counts.map(d => (
+                      <div key={d.label} style={{ flex: 1, textAlign: 'center' }}>
+                        <p style={{ fontSize: 11, color: C.midGray, margin: 0, lineHeight: 1.3 }}>{d.label}</p>
+                        <p style={{ fontSize: 11, color: C.midGray, margin: 0 }}>
+                          {total > 0 ? `${Math.round((d.count / total) * 100)}%` : '—'}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+
+          {/* Right: Recent conversation feed */}
+          <div style={{
+            backgroundColor: C.white, borderRadius: 10, border: `0.5px solid ${C.border}`,
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              padding: '16px 20px',
+              borderBottom: `0.5px solid ${C.border}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            }}>
+              <h2 style={{ fontSize: 15, fontWeight: 500, color: C.nearBlk, margin: 0 }}>
+                Recent
+              </h2>
+              <a href="/conversations" style={{ fontSize: 13, color: C.brand, textDecoration: 'none', fontWeight: 400 }}>
+                View all
+              </a>
+            </div>
+
+            <div>
+              {recent.length === 0 ? (
+                <div style={{ padding: '32px 20px', textAlign: 'center', color: C.midGray, fontSize: 13 }}>
+                  Loading…
+                </div>
+              ) : recent.map((row, i) => {
+                const name = row.leads?.name ?? '—';
+                const vehicle = row.leads?.vehicle_interest ?? '—';
                 return (
                   <div
-                    key={i}
-                    className="flex-1 rounded-sm transition-opacity duration-100"
+                    key={row.id}
                     style={{
-                      height: `${Math.max(heightPct, 4)}%`,
-                      backgroundColor: isBusiness ? C.accent : C.raised,
-                      opacity: isBusiness ? (0.3 + (v / maxHourly) * 0.7) : 0.4,
+                      display: 'flex', alignItems: 'center', gap: 12,
+                      padding: '12px 20px',
+                      borderBottom: i < recent.length - 1 ? `0.5px solid ${C.border}` : 'none',
                     }}
-                    title={`${i}:00 — ${v} leads`}
-                  />
+                  >
+                    <div style={{
+                      width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+                      backgroundColor: 'rgba(0,122,255,0.10)', color: C.brand,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 12, fontWeight: 500,
+                    }}>
+                      {initials(name)}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 13, fontWeight: 500, color: C.nearBlk, margin: '0 0 1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {name}
+                      </p>
+                      <p style={{ fontSize: 12, color: C.midGray, margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {vehicle}
+                      </p>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0 }}>
+                      <StatusBadge status={row.status} />
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, color: C.midGray }}>
+                        <Clock size={10} />
+                        {timeAgo(row.last_message_at)}
+                      </span>
+                    </div>
+                  </div>
                 );
               })}
             </div>
-
-            {/* Hour labels */}
-            <div className="flex mt-2 text-[10px]" style={{ color: C.ink3 }}>
-              {['12a', '3a', '6a', '9a', '12p', '3p', '6p', '9p'].map((label, i) => (
-                <span key={label} style={{ width: `${100 / 8}%` }}>{label}</span>
-              ))}
-            </div>
-          </div>
-
-          {/* Channel breakdown */}
-          <div
-            className="rounded-xl p-6"
-            style={{ backgroundColor: C.surface, border: `1px solid ${C.border}` }}
-          >
-            <h2 className="text-[13px] font-semibold mb-1" style={{ color: C.ink1 }}>
-              Channels
-            </h2>
-            <p className="text-[12px] mb-5" style={{ color: C.ink3 }}>By lead source this week</p>
-
-            <div className="space-y-4">
-              {channelBreakdown.map(ch => (
-                <div key={ch.label}>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-[12px] font-medium" style={{ color: C.ink2 }}>{ch.label}</span>
-                    <span className="text-[12px]" style={{ color: C.ink3, fontVariantNumeric: 'tabular-nums' }}>
-                      {ch.count}
-                    </span>
-                  </div>
-                  <div className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: C.raised }}>
-                    <div
-                      className="h-full rounded-full"
-                      style={{ width: `${ch.pct}%`, backgroundColor: C.accent, opacity: 0.55 + ch.pct / 200 }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
           </div>
         </div>
-
-        {/* Recent activity */}
-        <div
-          className="rounded-xl overflow-hidden"
-          style={{ backgroundColor: C.surface, border: `1px solid ${C.border}` }}
-        >
-          <div
-            className="px-6 py-4 flex items-center justify-between"
-            style={{ borderBottom: `1px solid ${C.borderSub}` }}
-          >
-            <h2 className="text-[13px] font-semibold" style={{ color: C.ink1 }}>Recent Activity</h2>
-            <a href="/conversations" className="text-[12px] font-medium" style={{ color: C.accent }}>
-              View all
-            </a>
-          </div>
-          <table className="w-full">
-            <tbody>
-              {recentActivity.map((row, i) => (
-                <tr
-                  key={row.name}
-                  style={{
-                    borderBottom: i < recentActivity.length - 1 ? `1px solid ${C.borderSub}` : 'none',
-                  }}
-                >
-                  <td className="px-6 py-3.5">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0"
-                        style={{ backgroundColor: C.accentDim, color: C.accent }}
-                      >
-                        {row.name.split(' ').map(n => n[0]).join('')}
-                      </div>
-                      <div>
-                        <p className="text-[13px] font-medium" style={{ color: C.ink1 }}>{row.name}</p>
-                        <p className="text-[11px]" style={{ color: C.ink3 }}>{row.vehicle}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-3.5">
-                    <span className="text-[12px]" style={{ color: C.ink2 }}>{row.action}</span>
-                  </td>
-                  <td className="px-6 py-3.5 text-right">
-                    <span className="text-[11px]" style={{ color: C.ink3 }}>{row.time}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
       </div>
     </div>
   );

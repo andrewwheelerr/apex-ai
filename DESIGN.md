@@ -2,130 +2,132 @@
 
 ## Overview
 
-Product register. Dark theme. Scene: fleet manager at a dealership reviewing overnight lead activity on a large monitor before the sales floor opens — high information density, minimal ornamentation.
+Product register. Light theme. Scene: dealership sales manager reviewing overnight lead activity on a 27-inch monitor before the floor opens — clean, high-contrast, iOS-native feel.
 
-Color strategy: **Committed** — one saturated electric blue carries the interactive layer. Everything else is deep navy with layered surface depth.
+Color strategy: **Restrained** — tinted neutrals plus one saturated brand blue as the sole interactive accent.
 
 ---
 
 ## Color Tokens
 
-All colors use OKLCH. Defined in `src/index.css` via `@theme` for Tailwind v4 utility generation.
+Defined inline via hex values throughout the codebase.
 
-### Surfaces (deep navy stack)
+### Surfaces
 
-| Token | OKLCH | Usage |
+| Role | Value | Usage |
 |---|---|---|
-| `--color-bg` | `oklch(11% 0.014 252)` | Page background |
-| `--color-surface` | `oklch(15% 0.018 252)` | Cards, sidebar, header bars |
-| `--color-raised` | `oklch(19% 0.022 252)` | Inputs, hover states, secondary surfaces |
-| `--color-high` | `oklch(24% 0.026 252)` | Active inputs, elevated elements |
-| `--color-border` | `oklch(28% 0.020 252)` | Component borders |
-| `--color-border-sub` | `oklch(21% 0.016 252)` | Subtle separators, row dividers |
+| Page background | `#F2F2F7` | App shell, page bg |
+| Sidebar | `#FAFAFA` | Sidebar background |
+| Card / panel | `#FFFFFF` | Cards, table bg, inputs |
 
-### Accent (electric blue)
+### Brand
 
-| Token | OKLCH | Usage |
+| Role | Value | Usage |
 |---|---|---|
-| `--color-accent` | `oklch(63% 0.225 240)` | Primary interactive color |
-| `--color-accent-hi` | `oklch(70% 0.215 240)` | Hover state, active nav text |
-| `--color-accent-dim` | `oklch(23% 0.055 240)` | Active nav background, avatar backgrounds, status chip backgrounds |
-| `--color-accent-muted` | `oklch(42% 0.090 240)` | Subdued accent contexts |
+| Brand blue | `#007AFF` | Interactive color, active states, CTAs |
+| Active nav bg | `rgba(0,122,255,0.07)` | Sidebar active item background |
 
 ### Ink (text hierarchy)
 
-| Token | OKLCH | Usage |
+| Role | Value | Usage |
 |---|---|---|
-| `--color-ink-1` | `oklch(93% 0.008 252)` | Primary text, headings, values |
-| `--color-ink-2` | `oklch(63% 0.012 252)` | Secondary text, table cells, labels |
-| `--color-ink-3` | `oklch(41% 0.010 252)` | Tertiary, timestamps, hints, column headers |
+| Primary text | `#1D1D1F` | Headings, names, values |
+| Secondary text | `#3A3A3C` | Table content, labels |
+| Tertiary text | `#8E8E93` | Timestamps, hints, section labels, captions |
 
 ### Semantic
 
-| Token | OKLCH | Usage |
+| Role | Value | Usage |
 |---|---|---|
-| `--color-ok` | `oklch(67% 0.155 148)` | Positive delta, success state |
-| `--color-ok-dim` | `oklch(21% 0.048 148)` | Success background |
-| `--color-warn` | `oklch(76% 0.138 68)` | Handed-off status, warning |
-| `--color-warn-dim` | `oklch(21% 0.048 68)` | Warning background |
-| `--color-err` | `oklch(62% 0.185 27)` | Error state |
-| `--color-err-dim` | `oklch(19% 0.048 27)` | Error background |
+| Success | `#34C759` | Positive deltas, success saved state |
+| Warning | `#FF9500` | Handed Off badges |
+| Danger | `#FF3B30` | Errors, auth errors |
 
-**OKLCH rule:** Chroma is reduced as lightness approaches 0 or 100. All neutrals are tinted toward hue 252 (blue-navy direction) at chroma 0.008–0.026. Never `#000` or `#fff`.
+### Borders
+
+All borders: `0.5px solid rgba(0,0,0,0.08)` — used consistently everywhere.
 
 ---
 
 ## Typography
 
-**Font:** Inter (Google Fonts), with system stack fallback. Loaded in `index.css`.
+**Font:** Inter (Google Fonts), weights 400 and 500 only. No weight above 500.
 
-| Role | Size | Weight | Usage |
+| Role | Size | Weight | Notes |
 |---|---|---|---|
-| Page title | 15px | 600 | Header bars |
-| Section heading | 13px | 600 | Card titles, section names |
-| Column header | 10px | 600 + uppercase + tracking-[0.07em] | Table column labels |
-| Body / cell | 13px | 400–500 | Table content, descriptions |
-| Label | 12px | 500 | Form labels |
-| Supporting | 11–12px | 400 | Hints, timestamps, meta |
-| Metric value | 28px | 600 + tracking-[-0.02em] | Dashboard KPI numbers |
-
-Numeric values use `fontVariantNumeric: 'tabular-nums'` for alignment.
+| Display | 28px | 500 | Page titles, letter-spacing -0.5px |
+| Heading | 20px | 500 | Section headings |
+| Body | 15px | 400 | Default text |
+| Small | 13px | 400 | Table cells, secondary content |
+| Caption | 11px | 500 | Uppercase + tracked — section labels, column headers |
 
 ---
 
 ## Layout
 
-**Sidebar:** 216px fixed. `bg-surface` + right border. Three zones: logo (58px h, bottom border), primary nav, bottom nav + dealer identity card.
+**Sidebar:** 220px fixed. `#FAFAFA` bg + 0.5px right border. Never collapses.
 
-**Content area:** `flex-1 overflow-auto`. Page header is a fixed 58px bar matching sidebar height — creates a continuous horizontal line across the layout.
+**Content area:** `flex-1 overflow-auto`. Page background `#F2F2F7`.
 
-**Content padding:** `px-8 py-6` for page content. `max-w-[720px]` on Settings to keep form width readable.
+**Page padding:** 32px horizontal, 28px vertical.
 
-**Dashboard grid:** `grid-cols-[1fr_280px]` for chart + channel breakdown asymmetric split.
+**Card gap:** 16px between cards. **Section gap:** 32px between major sections.
 
-**Metrics strip:** `grid-cols-4` with `border-right` dividers — not individual cards.
+**Border radius:** 10px standard, 14px for hero cards.
 
 ---
 
 ## Component Patterns
 
-### Nav items (sidebar)
+### Sidebar logo
+`Apex` in `#1D1D1F` + `AI` in `#007AFF`. Font 17px / weight 500.
 
-Active state uses `background-color: accent-dim` + `color: accent-hi`. No left-border stripe. Rounded (`rounded-lg`) pill background.
+### Dealer switcher
+White card (`#FFFFFF`), 0.5px border, 10px radius. Blue square avatar (bg `#007AFF`, white text) with dealer initials. Dropdown opens below with shadow `0 4px 16px rgba(0,0,0,0.10)`.
+
+### Nav items
+`display: flex; gap: 8px`. Icon 16px / strokeWidth 1.6. Font 14px / weight 400.
+Active: `backgroundColor: rgba(0,122,255,0.07)`, `color: #007AFF`. No border stripes.
+
+### Section labels (sidebar)
+10px / weight 500 / uppercase / letterSpacing 0.08em / color `#8E8E93`. Padding `0 12px`.
+
+### KPI hero card (Dashboard)
+`backdrop-filter: blur(12px)`, `background: rgba(255,255,255,0.72)`, `border-radius: 14px`. Gradient backdrop behind: `linear-gradient(135deg, rgba(0,122,255,0.13) 0%, rgba(52,199,89,0.05) 60%, transparent 100%)`.
+KPI values: 28px / 500 / letterSpacing -0.5px. Column dividers: 0.5px border-right.
 
 ### Status badges
+Inline pill, border-radius 6px.
+- Active: `bg rgba(0,122,255,0.10)` / `color #007AFF`
+- Handed Off: `bg rgba(255,149,0,0.10)` / `color #FF9500`
+- Closed: `bg rgba(0,0,0,0.06)` / `color #8E8E93`
 
-Inline-flex with small pill background. Three states:
-- **Active:** `bg-accent-dim text-accent` + animated dot
-- **Handed Off:** `bg-warn-dim text-warn`
-- **Closed:** `bg-raised text-ink-3`
+### Table
+White card with 0.5px border, 10px radius. Column headers: 11px / 500 / uppercase / tracked / `#8E8E93`. Row borders: 0.5px. Hover: `rgba(0,0,0,0.02)`.
 
 ### Form inputs
-
-`bg-raised border-border`. On focus: `border-color → accent`. `border-radius: 8px`. No box-shadow.
+`border-radius: 10px`, `border: 0.5px solid rgba(0,0,0,0.12)`, `background: #FFFFFF`, `font-size: 15px`. Focus: borderColor → `#007AFF`.
 
 ### Save button
+Default: `background: #007AFF`, `color: #FFFFFF`. Saved: `background: rgba(52,199,89,0.12)`, `color: #34C759` + Check icon. Resets after 2.2s.
 
-Default: `bg-accent text-white`. On save: transitions to `bg-ok-dim text-ok` with check icon for 2.2 seconds, then resets.
+### Toggle
+40x24px pill. On: `#007AFF`. Off: `rgba(0,0,0,0.12)`. White 18px knob. Transition: `left 0.15s`.
 
-### Tone selector (Settings)
+### Kanban cards
+White card, 10px radius, 0.5px border. Column dot: 8px circle in column accent color. Card hover: `box-shadow: 0 2px 8px rgba(0,0,0,0.07)`.
 
-`grid-cols-3`. Each option is a button with label + description. Active: `bg-accent-dim border-accent text-accent-hi`. Inactive: `bg-raised border-border`.
-
-### Keyword tags (Settings)
-
-Inline pills with `× ` removal button. Flush row with `flex flex-wrap gap-1.5`.
+### Integration cards
+2-column grid. Logo avatar: 40x40 with `logoColor + 18` (hex alpha) bg. Status badge inline pill. Connect button: `#007AFF` → becomes gray check when connected.
 
 ---
 
-## Absolute Bans (enforced in this codebase)
+## Absolute Bans
 
-- No side-stripe borders (`border-left` > 1px as colored accent)
-- No gradient text (`background-clip: text`)
-- No glassmorphism
-- No hero-metric template (big centered number + gradient accent)
-- No identical card grids
-- No nested cards
+- No side-stripe borders (`border-left` > 1px as accent)
+- No gradient text
+- No font-weight above 500
+- No dark/navy backgrounds
 
 ---
 
@@ -133,21 +135,15 @@ Inline pills with `× ` removal button. Flush row with `flex flex-wrap gap-1.5`.
 
 ```
 src/
-  index.css              Theme tokens (@theme), Google Fonts import, global reset
-  App.tsx                BrowserRouter + Routes
+  index.css              Google Fonts (Inter 400/500), body reset (light theme)
+  App.tsx                BrowserRouter + Routes (6 pages)
   components/
-    Layout.tsx           Sidebar + Outlet shell
+    Layout.tsx           220px sidebar + Outlet
   pages/
-    Onboarding.tsx       3-step setup wizard (no sidebar)
-    Dashboard.tsx        ROI metrics + hourly chart + recent activity
-    Conversations.tsx    Filterable conversation list
-    Settings.tsx         Agent persona, greeting, escalation rules
+    Dashboard.tsx        Frosted glass KPI hero + bar chart + conversation feed
+    Conversations.tsx    Filterable table with search/status filter + View CTA
+    Leads.tsx            Kanban board (4 columns: New/Contacted/Appt Set/Handed Off)
+    Settings.tsx         2-col: Dealership Info + AI Agent Settings / Notifications
+    AgentConfig.tsx      Model picker + system prompt editor + escalation rules
+    Integrations.tsx     8 integration cards with connect/disconnect + category filter
 ```
-
----
-
-## Extending
-
-To add a new color: add `--color-{name}: oklch(...)` inside `@theme` in `src/index.css`. Tailwind v4 generates `bg-{name}`, `text-{name}`, `border-{name}` utilities automatically.
-
-To add a new page: create `src/pages/NewPage.tsx`, import in `App.tsx`, add a `<Route>` inside the `<Layout>` route, and add a nav item to `Layout.tsx`'s `primaryNav` array.
