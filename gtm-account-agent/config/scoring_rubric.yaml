@@ -1,0 +1,19 @@
+score_categories:
+  target_market_alignment:
+    weight: 25
+    description: How directly the company matches the target market.
+  clinical_or_operational_relevance:
+    weight: 20
+    description: How clearly the company's business could benefit from the offering.
+  scale:
+    weight: 20
+    description: Whether the company has enough locations, patients, members, or operational footprint.
+  buyer_accessibility:
+    weight: 15
+    description: Whether likely buyers can be identified and reached.
+  tech_adoption_likelihood:
+    weight: 10
+    description: Whether the company appears likely to adopt technology-enabled workflows.
+  urgency_or_trigger:
+    weight: 10
+    description: Evidence of current initiatives, market pressure, expansion, or relevant timing.
