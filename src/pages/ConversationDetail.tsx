@@ -52,6 +52,19 @@ const TOOL_META: Record<string, { icon: React.ReactNode; label: (p: Record<strin
     label: p => `Handed off to team · ${p.reason ?? ''}`,
     color: '#FF9500',
   },
+  handle_objection: {
+    icon: <AlertCircle size={11} />,
+    label: p => {
+      const typeLabel: Record<string, string> = {
+        price: 'Price concern', timing: 'Not ready', competitor: 'Comparing competitors',
+        feature_concern: 'Feature concern', needs_spouse: 'Needs to check with spouse',
+      };
+      const count = p.timesRaised ? ` · raised ${p.timesRaised}×` : '';
+      const escalating = p.shouldEscalate === 'true' ? ' · escalating' : '';
+      return `${typeLabel[p.type] ?? 'Objection handled'}${count}${escalating}`;
+    },
+    color: '#AF52DE',
+  },
 };
 
 function ToolEvent({ content }: { content: string }) {

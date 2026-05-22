@@ -70,6 +70,25 @@ const TOOLS = [
       required: ['reason'],
     },
   },
+  {
+    name: 'handle_objection',
+    description: `Call this when the lead raises a hesitation or objection instead of moving forward. Do NOT call it for genuine questions — only for resistance signals like price concerns, stalling, comparing competitors, or needing approval from someone else. Returns a strategy tailored to how many times this objection has appeared.`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        type: {
+          type: 'string',
+          enum: ['price', 'timing', 'competitor', 'feature_concern', 'needs_spouse'],
+          description: 'The objection category. price=too expensive/payments. timing=not ready/need to think. competitor=comparing with another brand. feature_concern=specific feature worry. needs_spouse=needs to check with partner.',
+        },
+        context: {
+          type: 'string',
+          description: "One sentence summarizing exactly what the lead said.",
+        },
+      },
+      required: ['type', 'context'],
+    },
+  },
 ];
 
 // ── Tool handlers ────────────────────────────────────────────────────────────
@@ -160,6 +179,84 @@ async function handleTool(toolName, toolInput, conversationId) {
       content: JSON.stringify({ tool: 'escalate_to_human', reason }),
     });
     return { escalated: true };
+  }
+
+  if (toolName === 'handle_objection') {
+    const { type, context } = toolInput;
+
+    // Read current memory to check prior objection count
+    const { data: convRow } = await supabase
+      .from('conversations')
+      .select('lead_id')
+      .eq('id', conversationId)
+      .single();
+
+    const leadId = convRow?.lead_id;
+    let objectionCounts = {};
+    if (leadId) {
+      const { data: leadRow } = await supabase.from('leads').select('memory').eq('id', leadId).single();
+      objectionCounts = leadRow?.memory?.objection_counts ?? {};
+    }
+
+    const timesRaised = (objectionCounts[type] ?? 0) + 1;
+    const shouldEscalate = timesRaised >= 3;
+
+    // Strategy matrix: what Nova should do based on objection type and count
+    const STRATEGIES = {
+      price: [
+        'Acknowledge the concern warmly. Briefly highlight the long-term value and current Honda incentives. Pivot to a test drive — experiencing the car makes the price feel real.',
+        'The lead has mentioned price before. Acknowledge again, be direct: offer to connect them with a finance specialist who can show real numbers for their situation.',
+        'Price has come up three times. Escalate to a human who can make a real offer.',
+      ],
+      timing: [
+        'The lead isn\'t ready. Acknowledge without pressure. Ask one question: what would make them more confident? Offer a no-obligation test drive as a low-stakes next step.',
+        'Still not ready. Validate their pace. Offer to follow up in a week and ask if there\'s a specific concern you can address now.',
+        'The lead keeps stalling. Escalate — a human can have a direct conversation about what\'s really holding them back.',
+      ],
+      competitor: [
+        'Ask which competitor they\'re comparing. Then pick one specific Honda advantage that directly addresses what they likely care about. Don\'t trash the competitor.',
+        'They\'re still comparing. Invite them to test drive both and decide. Offer to answer any specific comparison questions.',
+        'Persistent competitor interest. Escalate to a sales rep who can do a side-by-side comparison conversation.',
+      ],
+      feature_concern: [
+        'Take the concern seriously. Address it with a specific fact or feature detail. If it\'s about space or feel, push toward a test drive where they can experience it.',
+        'The concern persists. Offer to have a product specialist answer in more detail, or suggest seeing it in person.',
+        'Escalate to someone who can do a deep product walkthrough.',
+      ],
+      needs_spouse: [
+        'Totally understandable. Offer resources they can share — brochure link, pricing sheet, or suggest bringing their partner to a test drive.',
+        'Mention that many couples find the test drive together is the deciding moment. Offer a flexible time that works for both.',
+        'Escalate — a sales rep can offer a joint appointment and work with both decision-makers.',
+      ],
+    };
+
+    const strategies = STRATEGIES[type] ?? STRATEGIES.timing;
+    const strategy = strategies[Math.min(timesRaised - 1, strategies.length - 1)];
+    const escalationReason = shouldEscalate
+      ? `Lead raised "${type}" objection ${timesRaised} times without resolution`
+      : null;
+
+    // Update objection count in memory
+    if (leadId) {
+      const { data: leadRow } = await supabase.from('leads').select('memory').eq('id', leadId).single();
+      const currentMemory = leadRow?.memory ?? {};
+      await supabase.from('leads').update({
+        memory: {
+          ...currentMemory,
+          objection_counts: { ...objectionCounts, [type]: timesRaised },
+        },
+      }).eq('id', leadId);
+    }
+
+    // Log as a visible thread event
+    await supabase.from('messages').insert({
+      conversation_id: conversationId,
+      role: 'tool_call',
+      content: JSON.stringify({ tool: 'handle_objection', type, timesRaised, shouldEscalate }),
+    });
+
+    console.log(`[objection] ${type} × ${timesRaised}${shouldEscalate ? ' → ESCALATE' : ''}`);
+    return { strategy, times_raised: timesRaised, should_escalate: shouldEscalate, escalation_reason: escalationReason };
   }
 
   return { error: `Unknown tool: ${toolName}` };
@@ -322,6 +419,8 @@ Guidelines:
 - Answer questions about the vehicle (trims, features, pricing, availability) confidently.
 - When the lead shows genuine interest in booking, call check_availability then book_appointment then send_confirmation in sequence.
 - When the lead asks about trade-in valuation, financing rates, or wants to speak to a person, call escalate_to_human.
+- When the lead pushes back, stalls, raises a price concern, compares to a competitor, or needs to check with a spouse — call handle_objection FIRST to get the right strategy, then respond using that strategy. Do not skip handle_objection for hesitation signals.
+- If handle_objection returns should_escalate=true, immediately call escalate_to_human.
 - Never reveal you are an AI unless directly asked. If asked, say "I'm Nova, Premier Honda's digital assistant."
 - Today's date is ${new Date().toISOString().split('T')[0]}. Use this to resolve relative dates like "this Saturday".`;
 }
