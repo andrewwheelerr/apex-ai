@@ -615,18 +615,46 @@ app.post('/api/simulate-lead', async (req, res) => {
 
 // ── Proactive follow-up ──────────────────────────────────────────────────────
 
-function buildFollowUpPrompt(conv) {
+function buildFollowUpPrompt(conv, recentMessages = []) {
   const lead = conv.leads;
+  const memory = lead?.memory ?? null;
+  const channelTone = conv.channel === 'sms'
+    ? 'This is SMS — keep it to 1-2 sentences, plain text, no formatting.'
+    : 'This is a chat widget — keep it to 2-3 sentences, warm and conversational.';
+
+  // Build memory context if available
+  const memorySection = memory ? `
+What you know about this lead from prior conversations:
+- Vehicles discussed: ${memory.vehicles_discussed?.join(', ') || 'none'}
+- Their preferences: ${memory.preferences?.join('; ') || 'none noted'}
+- Their objections: ${memory.objections?.join('; ') || 'none'}
+- Where they left off: ${memory.where_they_left_off || 'unknown'}
+- Your next best action: ${memory.next_best_action || 'continue the conversation'}
+${memory.objection_counts && Object.keys(memory.objection_counts).length > 0
+    ? `- Objections already raised: ${Object.entries(memory.objection_counts).map(([k, v]) => `${k} (${v}×)`).join(', ')}`
+    : ''}
+` : '';
+
+  // Include last few messages for immediate context
+  const recentSection = recentMessages.length > 0 ? `
+Last messages in this conversation:
+${recentMessages.map(m => `${m.role === 'agent' ? 'Nova' : 'Lead'}: ${m.content}`).join('\n')}
+` : '';
+
   return `You are Nova, an AI sales agent for Premier Honda.
 
-Lead context:
-- Name: ${lead?.name ?? 'the customer'}
-- Vehicle interest: ${lead?.vehicle_interest ?? 'not specified'}
-- Channel: ${conv.channel}
+Lead: ${lead?.name ?? 'the customer'}, interested in ${lead?.vehicle_interest ?? 'not specified'}.
+Channel: ${conv.channel}
+${memorySection}${recentSection}
+The lead has gone quiet. Write a single follow-up message that:
+- References something specific from the conversation — prove you were paying attention
+- Addresses or gently sidesteps their main objection if one exists, but don't repeat a failed approach
+- Executes the "next best action" if one is set
+- Makes one low-pressure ask or offer
+- ${channelTone}
+- No emojis. Do not book anything — just re-engage.
 
-The lead hasn't responded in 4+ hours. Write one short, natural follow-up message
-referencing what they were interested in. Be warm, not pushy. No emojis. 2 sentences max.
-Do not book anything — just re-engage.`;
+If there is no memory, write a warm, brief check-in referencing the vehicle they were interested in.`;
 }
 
 async function runFollowUps(options = {}) {
@@ -635,7 +663,7 @@ async function runFollowUps(options = {}) {
 
   const { data: stale, error } = await supabase
     .from('conversations')
-    .select('*, leads(name, vehicle_interest, source_channel)')
+    .select('*, leads(id, name, vehicle_interest, source_channel, memory)')
     .eq('status', 'active')
     .lt('last_message_at', cutoff)
     .is('follow_up_sent_at', null);
@@ -649,18 +677,22 @@ async function runFollowUps(options = {}) {
   for (const conv of stale) {
     try {
       if (dryRun) {
-        results.push({ conversationId: conv.id, lead: conv.leads?.name, status: 'would_send' });
+        const hasMemory = !!conv.leads?.memory;
+        results.push({ conversationId: conv.id, lead: conv.leads?.name, status: 'would_send', hasMemory });
         continue;
       }
 
-      const response = await anthropic.messages.create({
-        model: process.env.AGENT_MODEL ?? 'claude-haiku-4-5-20251001',
-        max_tokens: 256,
-        system: buildFollowUpPrompt(conv),
-        messages: [{ role: 'user', content: '(generate follow-up)' }],
-      });
+      // Fetch last 3 messages for immediate context
+      const { data: recentMessages } = await supabase
+        .from('messages')
+        .select('role, content')
+        .eq('conversation_id', conv.id)
+        .in('role', ['user', 'agent'])
+        .order('created_at', { ascending: false })
+        .limit(3);
 
-      const reply = response.content.find(b => b.type === 'text')?.text ?? '';
+      const recent = (recentMessages ?? []).reverse();
+      const reply = await generateFollowUp(conv, recent);
       if (!reply) continue;
 
       await supabase.from('messages').insert({
@@ -673,7 +705,12 @@ async function runFollowUps(options = {}) {
         conversation_id: conv.id,
         dealership_id: DEALERSHIP_ID,
         event_type: 'proactive_followup',
-        metadata: { reply, source: 'scheduler' },
+        metadata: {
+          reply,
+          source: 'scheduler',
+          memory_used: !!conv.leads?.memory,
+          next_best_action: conv.leads?.memory?.next_best_action ?? null,
+        },
       });
 
       await supabase.from('conversations').update({
@@ -683,8 +720,9 @@ async function runFollowUps(options = {}) {
         updated_at: new Date().toISOString(),
       }).eq('id', conv.id);
 
-      console.log(`[follow-up] sent to ${conv.leads?.name} (${conv.id})`);
-      results.push({ conversationId: conv.id, lead: conv.leads?.name, reply });
+      const memoryFlag = conv.leads?.memory ? '[memory]' : '[no memory]';
+      console.log(`[follow-up] ${memoryFlag} sent to ${conv.leads?.name}: "${reply.slice(0, 80)}…"`);
+      results.push({ conversationId: conv.id, lead: conv.leads?.name, reply, memoryUsed: !!conv.leads?.memory });
     } catch (err) {
       console.error(`[follow-up] error for ${conv.id}:`, err.message);
       results.push({ conversationId: conv.id, lead: conv.leads?.name, error: err.message });
@@ -692,6 +730,16 @@ async function runFollowUps(options = {}) {
   }
 
   return results;
+}
+
+async function generateFollowUp(conv, recentMessages) {
+  const response = await anthropic.messages.create({
+    model: process.env.AGENT_MODEL ?? 'claude-haiku-4-5-20251001',
+    max_tokens: 256,
+    system: buildFollowUpPrompt(conv, recentMessages),
+    messages: [{ role: 'user', content: '(generate follow-up)' }],
+  });
+  return response.content.find(b => b.type === 'text')?.text ?? '';
 }
 
 // Run every 15 minutes
